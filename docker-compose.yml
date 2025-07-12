@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  jules_api:
+    # This tells Docker Compose to build the image from the Dockerfile
+    # in the current directory (.)
+    build: .
+    # Name the container for easier management
+    container_name: jules_poc_api_container
+    # Map port 8000 on your host machine to port 8000 in the container
+    ports:
+      - "8000:8000"
+    # Mount the current directory into the /app directory in the container
+    # This is great for development, as changes you make to your code
+    # locally will be reflected inside the container without rebuilding.
+    volumes:
+      - .:/app
