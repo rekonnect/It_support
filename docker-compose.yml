@@ -2,16 +2,29 @@ version: '3.8'
 
 services:
   jules_api:
-    # This tells Docker Compose to build the image from the Dockerfile
-    # in the current directory (.)
     build: .
-    # Name the container for easier management
     container_name: jules_poc_api_container
-    # Map port 8000 on your host machine to port 8000 in the container
+    command: ["/app/wait-for-it.sh", "db", "5432", "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "8000:8000"
-    # Mount the current directory into the /app directory in the container
-    # This is great for development, as changes you make to your code
-    # locally will be reflected inside the container without rebuilding.
     volumes:
       - .:/app
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/jules_db
+
+  db:
+    image: postgres:14-alpine
+    container_name: jules_poc_db_container
+    expose:
+      - "5432"
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=jules_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+
+volumes:
+  postgres_data:

@@ -1,20 +1,24 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, func
 from sqlalchemy.orm import relationship
-from datetime import datetime
 from .database import Base
 
-# --- Tenant Model ---
+# -------------------------
+# Tenant Table
+# -------------------------
 
 class Tenant(Base):
     __tablename__ = "tenants"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    name = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # One-to-many relationship with users
     users = relationship("User", back_populates="owner")
 
-# --- User Model ---
+# -------------------------
+# User Table
+# -------------------------
 
 class User(Base):
     __tablename__ = "users"

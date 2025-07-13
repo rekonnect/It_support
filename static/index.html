@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Jules AI Agent - PoC Admin</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        input { display: block; margin-bottom: 1em; }
+        .form-section { margin-bottom: 2em; padding-bottom: 1em; border-bottom: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <h1>Jules AI Agent - PoC Admin</h1>
+
+    <!-- Create Tenant Form -->
+    <div class="form-section">
+        <h2>Create a New Tenant</h2>
+        <form id="create-tenant-form">
+            <label for="tenant-name">Tenant Name:</label>
+            <input type="text" id="tenant-name" name="name" required>
+            <button type="submit">Create Tenant</button>
+        </form>
+        <p id="tenant-response"></p>
+    </div>
+
+    <!-- Create User Form -->
+    <div class="form-section">
+        <h2>Create a New User</h2>
+        <form id="create-user-form">
+            <label for="user-email">Email:</label>
+            <input type="email" id="user-email" name="email" required>
+
+            <label for="user-password">Password:</label>
+            <input type="password" id="user-password" name="password" required>
+
+            <label for="user-is-active">Is Active:</label>
+            <select id="user-is-active" name="is_active">
+                <option value="true">True</option>
+                <option value="false">False</option>
+            </select>
+
+            <button type="submit">Create User</button>
+        </form>
+        <p id="user-response"></p>
+    </div>
+
+    <script>
+        // Tenant Form Submit
+        document.getElementById('create-tenant-form').addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const tenantName = document.getElementById('tenant-name').value;
+            const responseElement = document.getElementById('tenant-response');
+
+            try {
+                const response = await fetch('/tenants/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: tenantName }),
+                });
+
+                const result = await response.json();
+                responseElement.textContent = response.ok
+                    ? `Success! Created tenant: ${result.name} (ID: ${result.id})`
+                    : `Error: ${result.detail}`;
+            } catch (error) {
+                responseElement.textContent = 'Network error';
+                console.error(error);
+            }
+        });
+
+        // User Form Submit
+        document.getElementById('create-user-form').addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const email = document.getElementById('user-email').value;
+            const password = document.getElementById('user-password').value;
+            const isActive = document.getElementById('user-is-active').value === 'true';
+            const responseElement = document.getElementById('user-response');
+
+            try {
+                const response = await fetch('/users/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password,
+                        is_active: isActive
+                    }),
+                });
+
+                const result = await response.json();
+                responseElement.textContent = response.ok
+                    ? `Success! Created user: ${result.email}`
+                    : `Error: ${result.detail}`;
+            } catch (error) {
+                responseElement.textContent = 'Network error';
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>

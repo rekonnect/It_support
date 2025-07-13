@@ -1,21 +1,39 @@
-from pydantic import BaseModel, Field
-from datetime import datetime
+from pydantic import BaseModel, EmailStr
+import datetime
+
+# -------------------------
+# Tenant Schemas
+# -------------------------
 
 class TenantBase(BaseModel):
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="The unique name of the tenant"
-    )
+    name: str
 
 class TenantCreate(TenantBase):
-    """Schema for tenant creation request"""
     pass
 
 class Tenant(TenantBase):
     id: int
-    created_at: datetime
+    created_at: datetime.datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
+
+# -------------------------
+# User Schemas
+# -------------------------
+
+class UserBase(BaseModel):
+    email: EmailStr
+    is_active: bool = True
+
+class UserCreate(UserBase):
+    password: str  # only used when creating a user
+
+class User(UserBase):
+    id: int
+    tenant_id: int
+
+    model_config = {
+        "from_attributes": True
+    }
