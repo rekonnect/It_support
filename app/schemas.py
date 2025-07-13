@@ -1,39 +1,61 @@
 from pydantic import BaseModel, EmailStr
-import datetime
+from typing import Optional
+from datetime import datetime
 
-# -------------------------
+# -------------------------------
 # Tenant Schemas
-# -------------------------
+# -------------------------------
 
-class TenantBase(BaseModel):
+class TenantCreate(BaseModel):
     name: str
 
-class TenantCreate(TenantBase):
-    pass
-
-class Tenant(TenantBase):
+class Tenant(BaseModel):
     id: int
-    created_at: datetime.datetime
+    name: str
+    created_at: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    class Config:
+        from_attributes = True
 
-# -------------------------
+
+# -------------------------------
 # User Schemas
-# -------------------------
+# -------------------------------
 
-class UserBase(BaseModel):
+class UserCreate(BaseModel):
+    username: str
     email: EmailStr
-    is_active: bool = True
-
-class UserCreate(UserBase):
-    password: str  # only used when creating a user
-
-class User(UserBase):
-    id: int
+    password: str
     tenant_id: int
 
-    model_config = {
-        "from_attributes": True
-    }
+class User(BaseModel):
+    id: int
+    username: str
+    email: EmailStr
+    tenant_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# -------------------------------
+# DiagnosticsLog Schemas
+# -------------------------------
+
+class DiagnosticsLogCreate(BaseModel):
+    source_ip: str
+    destination_ip: str
+    status: str
+    output: Optional[str] = None
+
+class DiagnosticsLog(BaseModel):
+    id: int
+    source_ip: str
+    destination_ip: str
+    status: str
+    output: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

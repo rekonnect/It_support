@@ -1,23 +1,23 @@
-import os
+import hashlib
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from . import models, schemas, database
-import hashlib
 
+from . import models, schemas, database
+from .diagnostics import ping_host
+from .scheduler import start_scheduler  # Import the scheduler starter
+
+# Create tables if they don't exist
 models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(title="Jules AI Agent PoC")
 
-# Mount the static folder
+# Mount static files directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# -------------------------
-# DB Session Dependency
-# -------------------------
-
+# Dependency to get DB session
 def get_db():
     db = database.SessionLocal()
     try:
@@ -25,11 +25,7 @@ def get_db():
     finally:
         db.close()
 
-# -------------------------
-# Routes
-# -------------------------
-
-# ✅ Serve HTML on root
+# Serve the index.html file on root
 @app.get("/", response_class=FileResponse)
 async def read_index():
     return "static/index.html"
@@ -55,18 +51,28 @@ def read_tenants(skip: int = 0, limit: int = 100, db: Session = Depends(get_db))
 
 @app.post("/users/", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    # Check if email already exists
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Very basic password hashing using SHA256 (❗ not secure in production)
+    # Check if username already exists
+    db_username = db.query(models.User).filter(models.User.username == user.username).first()
+    if db_username:
+        raise HTTPException(status_code=400, detail="Username already registered")
+
+    # Verify tenant exists
+    tenant = db.query(models.Tenant).filter(models.Tenant.id == user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=400, detail="Tenant not found")
+
     hashed_pw = hashlib.sha256(user.password.encode()).hexdigest()
 
     new_user = models.User(
+        username=user.username,
         email=user.email,
         hashed_password=hashed_pw,
-        is_active=user.is_active,
-        tenant_id=1  # Static for now, improve later
+        tenant_id=user.tenant_id
     )
     db.add(new_user)
     db.commit()
@@ -76,3 +82,19 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 @app.get("/users/", response_model=List[schemas.User])
 def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return db.query(models.User).offset(skip).limit(limit).all()
+
+# --- Diagnostics Endpoint ---
+
+@app.post("/diagnose/connectivity/")
+def diagnose_connectivity(data: dict):
+    source_ip = data.get("source_ip")
+    destination_ip = data.get("destination_ip")
+    if not source_ip or not destination_ip:
+        raise HTTPException(status_code=400, detail="source_ip and destination_ip are required")
+
+    result = ping_host(destination_ip)
+    return {"source_ip": source_ip, "destination_ip": destination_ip, "ping_result": result}
+
+# Start the scheduler on app startup
+start_scheduler()
+
