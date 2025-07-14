@@ -1,5 +1,5 @@
 import hashlib
-from fastapi import FastAPI, Depends, HTTPException, Body # NEW: Import Body
+from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -7,7 +7,8 @@ from typing import List
 
 from . import models, schemas, database
 from .diagnostics import ping_host # Keep this import for the original diagnostics endpoint
-from .automation_engine import ping_host as network_ping_host # Import ping_host from automation_engine.py
+# UPDATED: Import both ping_host and run_cisco_command from automation_engine.py
+from .automation_engine import ping_host as network_ping_host, run_cisco_command
 from .scheduler import start_scheduler
 
 # Create tables if they don't exist
@@ -97,10 +98,21 @@ def diagnose_connectivity(data: dict):
     result = ping_host(destination_ip)
     return {"source_ip": source_ip, "destination_ip": destination_ip, "ping_result": result}
 
-# CORRECTED: Endpoint for ping diagnostic to expect a JSON object
 @app.post("/diagnose/ping")
-def diagnose_ping(ip_address: str = Body(..., embed=True)): # Expects a JSON body like {"ip_address": "..."}
+def diagnose_ping(ip_address: str = Body(..., embed=True)):
     return network_ping_host(ip_address) # Calls the ping_host function from automation_engine.py
+
+# NEW: Endpoint for running Cisco commands via SSH
+@app.post("/diagnose/cisco_command")
+def diagnose_cisco_command(host: str = Body(..., embed=True), command: str = Body(..., embed=True)):
+    # For PoC, we are hardcoding credentials.
+    # In a real app, these would come from the secure credential vault!
+    user = "cisco"
+    password = "cisco"
+    
+    # Call the run_cisco_command function from automation_engine.py
+    result = run_cisco_command(host, user, password, command)
+    return result
 
 # Start the scheduler on app startup
 start_scheduler()

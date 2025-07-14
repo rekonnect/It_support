@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session # For database session management
 import logging # For logging information
 from datetime import datetime # Needed for datetime.utcnow()
 from .models import DiagnosticsLog # Import your DiagnosticsLog model
+from netmiko import ConnectHandler # NEW: Import ConnectHandler for SSH connections
 
 # This is the ping_host function that executes the system ping command.
 def ping_host(ip_address: str) -> dict:
@@ -67,3 +68,48 @@ def perform_basic_network_diagnostics(db: Session, source_ip: str, destination_i
 
     logging.info(f"[Automation Engine][{trigger}] Logged diagnostic #{log.id} for {destination_ip}")
     return result # Return the raw ping result
+
+# NEW: Function to connect to a Cisco IOS device and run a command via SSH
+def run_cisco_command(host: str, user: str, password: str, command: str) -> dict:
+    """
+    Connects to a Cisco IOS device via SSH and runs a command.
+
+    Args:
+        host (str): The hostname or IP address of the Cisco device.
+        user (str): The SSH username for the device.
+        password (str): The SSH password for the device.
+        command (str): The command to execute on the device.
+
+    Returns:
+        dict: A dictionary containing the host, command, success status, and output.
+    """
+    print(f"--- Automation Engine: Running '{command}' on {host} ---")
+    
+    # Define device parameters for Netmiko
+    cisco_device = {
+        'device_type': 'cisco_ios', # Specify the device type
+        'host': host,
+        'username': user,
+        'password': password,
+        'global_delay_factor': 2, # Add a delay factor for slower devices/connections
+    }
+    
+    try:
+        # Establish SSH connection and execute command
+        with ConnectHandler(**cisco_device) as net_connect:
+            output = net_connect.send_command(command) # Send the command and capture output
+            return {
+                "host": host,
+                "command": command,
+                "success": True,
+                "output": output
+            }
+    except Exception as e:
+        # Catch any exceptions during connection or command execution
+        return {
+            "host": host,
+            "command": command,
+            "success": False,
+            "output": f"An unexpected error occurred: {str(e)}"
+        }
+
