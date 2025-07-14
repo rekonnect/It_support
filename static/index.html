@@ -2,11 +2,69 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jules AI Agent - PoC Admin</title>
     <style>
-        body { font-family: sans-serif; margin: 2em; }
-        input { display: block; margin-bottom: 1em; }
-        .form-section { margin-bottom: 2em; padding-bottom: 1em; border-bottom: 1px solid #ccc; }
+        body { font-family: 'Inter', sans-serif; margin: 2em; background-color: #f4f7f6; color: #333; }
+        input, select, button {
+            display: block;
+            margin-bottom: 1em;
+            padding: 0.8em;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            width: calc(100% - 1.6em); /* Account for padding */
+            max-width: 300px;
+            box-sizing: border-box; /* Include padding in width */
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border: none;
+            padding: 1em 1.5em;
+            border-radius: 8px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .form-section {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 2em;
+            margin-bottom: 2em;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
+            border: 1px solid #eee;
+        }
+        h1, h2 {
+            color: #2c3e50;
+            margin-bottom: 1em;
+        }
+        p {
+            margin-top: 1em;
+            font-size: 0.9em;
+            color: #555;
+        }
+        /* Unified style for response messages */
+        .response-message {
+            font-weight: bold;
+            white-space: pre-wrap; /* Preserve whitespace and line breaks for ping output */
+            word-wrap: break-word; /* Break long words */
+        }
+        .response-success {
+            color: #007bff; /* Blue for success */
+        }
+        .response-error {
+            color: red; /* Red for errors */
+        }
+        pre { /* Styling for preformatted text like ping output */
+            background-color: #f0f0f0;
+            padding: 1em;
+            border-radius: 8px;
+            overflow-x: auto; /* Allow horizontal scrolling for long lines */
+        }
     </style>
 </head>
 <body>
@@ -20,34 +78,65 @@
             <input type="text" id="tenant-name" name="name" required>
             <button type="submit">Create Tenant</button>
         </form>
-        <p id="tenant-response"></p>
+        <p id="tenant-response" class="response-message"></p>
     </div>
 
     <!-- Create User Form -->
     <div class="form-section">
         <h2>Create a New User</h2>
         <form id="create-user-form">
+            <label for="user-username">Username:</label>
+            <input type="text" id="user-username" name="username" required>
+
             <label for="user-email">Email:</label>
             <input type="email" id="user-email" name="email" required>
 
             <label for="user-password">Password:</label>
             <input type="password" id="user-password" name="password" required>
 
-            <label for="user-is-active">Is Active:</label>
-            <select id="user-is-active" name="is_active">
-                <option value="true">True</option>
-                <option value="false">False</option>
-            </select>
+            <label for="user-tenant-id">Tenant ID:</label>
+            <input type="number" id="user-tenant-id" name="tenant_id" required min="1">
 
             <button type="submit">Create User</button>
         </form>
-        <p id="user-response"></p>
+        <p id="user-response" class="response-message"></p>
+    </div>
+
+    <!-- Run Ping Diagnostic Form -->
+    <div class="form-section">
+        <h2>Run Ping Diagnostic</h2>
+        <form id="ping-form">
+            <label for="ping-ip">IP Address to Ping:</label>
+            <input type="text" id="ping-ip" required placeholder="e.g., 8.8.8.8 or google.com">
+            <button type="submit">Run Ping</button>
+        </form>
+        <pre id="ping-response" class="response-message"></pre> <!-- Use <pre> for preformatted text like ping output -->
     </div>
 
     <script>
+        // Helper function to display messages
+        function displayMessage(elementId, message, isError = false) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.classList.remove('response-success', 'response-error'); // Clear previous classes
+            element.classList.add(isError ? 'response-error' : 'response-success'); // Add appropriate class
+        }
+
+        // Helper to format error details from FastAPI
+        function formatErrorDetail(detail) {
+            if (Array.isArray(detail)) {
+                return detail.map(err => `${err.loc.join('.')} - ${err.msg}`).join('\n');
+            }
+            // If detail is a string, it might be a direct error message from HTTPException
+            if (typeof detail === 'string') {
+                return detail;
+            }
+            return JSON.stringify(detail, null, 2); // Fallback for other unexpected formats
+        }
+
         // Tenant Form Submit
         document.getElementById('create-tenant-form').addEventListener('submit', async function (event) {
-            event.preventDefault();
+            event.preventDefault(); // Prevent default form submission
 
             const tenantName = document.getElementById('tenant-name').value;
             const responseElement = document.getElementById('tenant-response');
@@ -55,47 +144,93 @@
             try {
                 const response = await fetch('/tenants/', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
                     body: JSON.stringify({ name: tenantName }),
                 });
 
-                const result = await response.json();
-                responseElement.textContent = response.ok
-                    ? `Success! Created tenant: ${result.name} (ID: ${result.id})`
-                    : `Error: ${result.detail}`;
+                const data = await response.json();
+
+                if (response.ok) {
+                    displayMessage('tenant-response', `Tenant created: ID ${data.id}, Name: ${data.name}`);
+                } else {
+                    displayMessage('tenant-response', `Error: ${formatErrorDetail(data.detail) || 'Failed to create tenant'}`, true);
+                }
             } catch (error) {
-                responseElement.textContent = 'Network error';
-                console.error(error);
+                displayMessage('tenant-response', `Network error: ${error.message}`, true);
             }
         });
 
         // User Form Submit
         document.getElementById('create-user-form').addEventListener('submit', async function (event) {
-            event.preventDefault();
+            event.preventDefault(); // Prevent default form submission
 
+            const username = document.getElementById('user-username').value;
             const email = document.getElementById('user-email').value;
             const password = document.getElementById('user-password').value;
-            const isActive = document.getElementById('user-is-active').value === 'true';
+            const tenantId = parseInt(document.getElementById('user-tenant-id').value, 10); // Ensure it's an integer
             const responseElement = document.getElementById('user-response');
+
+            // Construct the data payload according to schemas.UserCreate
+            const userData = {
+                username: username,
+                email: email,
+                password: password,
+                tenant_id: tenantId
+            };
 
             try {
                 const response = await fetch('/users/', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: email,
-                        password: password,
-                        is_active: isActive
-                    }),
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(userData), // Send the complete userData object
                 });
 
-                const result = await response.json();
-                responseElement.textContent = response.ok
-                    ? `Success! Created user: ${result.email}`
-                    : `Error: ${result.detail}`;
+                const data = await response.json();
+
+                if (response.ok) {
+                    displayMessage('user-response', `User created: ID ${data.id}, Username: ${data.username}, Email: ${data.email}`);
+                } else {
+                    // Display specific error details from FastAPI if available
+                    displayMessage('user-response', `Error: ${formatErrorDetail(data.detail) || 'Failed to create user'}`, true);
+                }
             } catch (error) {
-                responseElement.textContent = 'Network error';
-                console.error(error);
+                displayMessage('user-response', `Network error: ${error.message}`, true);
+            }
+        });
+
+        // Ping Form Submit
+        document.getElementById('ping-form').addEventListener('submit', async function (event) {
+            event.preventDefault(); // Prevent default form submission
+
+            const ipAddress = document.getElementById('ping-ip').value;
+            const responseElement = document.getElementById('ping-response');
+            displayMessage('ping-response', 'Pinging...', false); // Use displayMessage for consistent styling
+
+            try {
+                const response = await fetch('/diagnose/ping', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    // Send the IP address as a JSON object with key 'ip_address'
+                    body: JSON.stringify({ ip_address: ipAddress }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Display success or failure based on the backend's ping result
+                    const status = data.success ? "Success" : "Failure";
+                    displayMessage('ping-response', `Ping to ${data.ip_address} - Status: ${status}\nOutput:\n${data.output}`, !data.success);
+                } else {
+                    displayMessage('ping-response', `Error: ${formatErrorDetail(data.detail) || 'Failed to run ping diagnostic'}`, true);
+                }
+            } catch (error) {
+                displayMessage('ping-response', `Network error: ${error.message}`, true);
             }
         });
     </script>

@@ -3,6 +3,7 @@ uvicorn
 sqlalchemy
 pydantic[email]
 psycopg2-binary
+APScheduler
 
 # The following are helpful package descriptions (commented out):
 # sqlalchemy: The ORM.
