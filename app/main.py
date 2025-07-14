@@ -1,13 +1,14 @@
 import hashlib
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Body # NEW: Import Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 
 from . import models, schemas, database
-from .diagnostics import ping_host
-from .scheduler import start_scheduler  # Import the scheduler starter
+from .diagnostics import ping_host # Keep this import for the original diagnostics endpoint
+from .automation_engine import ping_host as network_ping_host # Import ping_host from automation_engine.py
+from .scheduler import start_scheduler
 
 # Create tables if they don't exist
 models.Base.metadata.create_all(bind=database.engine)
@@ -83,7 +84,7 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return db.query(models.User).offset(skip).limit(limit).all()
 
-# --- Diagnostics Endpoint ---
+# --- Diagnostics Endpoints ---
 
 @app.post("/diagnose/connectivity/")
 def diagnose_connectivity(data: dict):
@@ -92,9 +93,14 @@ def diagnose_connectivity(data: dict):
     if not source_ip or not destination_ip:
         raise HTTPException(status_code=400, detail="source_ip and destination_ip are required")
 
+    # This ping_host comes from .diagnostics
     result = ping_host(destination_ip)
     return {"source_ip": source_ip, "destination_ip": destination_ip, "ping_result": result}
 
+# CORRECTED: Endpoint for ping diagnostic to expect a JSON object
+@app.post("/diagnose/ping")
+def diagnose_ping(ip_address: str = Body(..., embed=True)): # Expects a JSON body like {"ip_address": "..."}
+    return network_ping_host(ip_address) # Calls the ping_host function from automation_engine.py
+
 # Start the scheduler on app startup
 start_scheduler()
-
