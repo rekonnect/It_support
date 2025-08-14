@@ -6,14 +6,15 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from . import models, schemas, database
+from .routers import tasks
 # REMOVED: from .diagnostics import ping_host # This line caused the ImportError
 # UPDATED: Import both ping_host and run_cisco_command from automation_engine.py
 from .automation_engine import ping_host as network_ping_host, run_cisco_command
 from .scheduler import start_scheduler
 from .diagnostics import connectivity # CORRECT: Import the connectivity module from the diagnostics package
 
-# Create tables if they don't exist
-models.Base.metadata.create_all(bind=database.engine)
+# NOTE: models.Base.metadata.create_all(bind=database.engine) was removed.
+# Alembic is now the single source of truth for database schema management.
 
 app = FastAPI(title="Jules AI Agent PoC")
 
@@ -126,6 +127,9 @@ def full_connectivity_check(source_ip: str = Body(..., embed=True), destination_
     # Call the diagnose_connectivity function from the new connectivity module
     report = connectivity.diagnose_connectivity(source_ip, destination_ip)
     return report
+
+# Include routers
+app.include_router(tasks.router)
 
 # Start the scheduler on app startup
 start_scheduler()

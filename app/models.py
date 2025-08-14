@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
@@ -39,3 +39,19 @@ class DiagnosticsLog(Base):
     status = Column(String, nullable=False)  # e.g. "success", "failure"
     output = Column(Text)  # store ping output or error message
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ScheduledTask(Base):
+    __tablename__ = "scheduled_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True, nullable=False)
+    task_type = Column(String, nullable=False)  # e.g., "ping", "cisco_command"
+    target = Column(String, nullable=False)  # e.g., IP address or hostname
+    cron_schedule = Column(String, nullable=False)  # e.g., "*/5 * * * *"
+    is_enabled = Column(Boolean, default=True)
+    details = Column(JSON)  # For extra info, like the command for "cisco_command"
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    tenant = relationship("Tenant")
