@@ -1,115 +1,107 @@
-import subprocess # Used to run external commands like 'ping'
-import platform   # Used to detect the operating system (though simplified for Linux container)
-from sqlalchemy.orm import Session # For database session management
-import logging # For logging information
-from datetime import datetime # Needed for datetime.utcnow()
-from .models import DiagnosticsLog # Import your DiagnosticsLog model
-from netmiko import ConnectHandler # NEW: Import ConnectHandler for SSH connections
+"""
+app/automation_engine.py
+Core automation engine for interacting with network devices via SSH.
+"""
+import asyncio
+import asyncssh
+import threading
+import time
+import logging
+from typing import Dict, Any, Optional
 
-# This is the ping_host function that executes the system ping command.
-def ping_host(ip_address: str) -> dict:
-    """
-    Pings a given IP address and returns the success status and output.
-    This version is simplified for a Linux-based container environment.
-    """
-    print(f"--- Automation Engine: Pinging {ip_address} ---")
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
-    # Use '-c 1' for Linux to send only one ping packet
-    # The 'command' list defines the parts of the shell command
-    command = ['ping', '-c', '1', ip_address]
+SSH_LOOP: Optional[asyncio.AbstractEventLoop] = None
+SSH_LOOP_THREAD: Optional[threading.Thread] = None
+SESSION_POOL: Dict[tuple, Dict[str, Any]] = {}
+DEFAULT_CMD_TIMEOUT = 20
+SESSION_IDLE_TIMEOUT = 60 * 60
 
+def _ssh_loop_runner():
+    global SSH_LOOP
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    SSH_LOOP = loop
+    loop.create_task(_session_cleanup_task())
+    loop.run_forever()
+
+def _ensure_ssh_loop_started(timeout: float = 5.0):
+    global SSH_LOOP_THREAD
+    if SSH_LOOP is not None: return
+    t = threading.Thread(target=_ssh_loop_runner, name="ssh-loop-thread", daemon=True)
+    SSH_LOOP_THREAD = t
+    t.start()
+    start_time = time.time()
+    while SSH_LOOP is None:
+        if time.time() - start_time > timeout:
+            raise RuntimeError("Failed to start SSH event loop thread.")
+        time.sleep(0.01)
+
+def _submit_to_ssh_loop(coro):
+    _ensure_ssh_loop_started()
+    return asyncio.run_coroutine_threadsafe(coro, SSH_LOOP)
+
+async def _create_connection(host: str, username: str, password: str, port: int = 22, **kwargs) -> asyncssh.SSHClientConnection:
+    return await asyncssh.connect(host, port=port, username=username, password=password, **kwargs)
+
+async def _ensure_session(host: str, username: str, password: str, port: int = 22) -> asyncssh.SSHClientConnection:
+    key = (host, username)
+    entry = SESSION_POOL.get(key)
+    if entry and (conn := entry.get("conn")):
+        try:
+            await asyncio.wait_for(conn.run("echo ping", check=True), timeout=3)
+            entry["last_used"] = time.time()
+            return conn
+        except Exception:
+            if conn: conn.close()
+            SESSION_POOL.pop(key, None)
+
+    conn = await _create_connection(host=host, username=username, password=password, port=port, known_hosts=None)
+    SESSION_POOL[key] = {"conn": conn, "lock": asyncio.Lock(), "last_used": time.time()}
+    return conn
+
+async def _run_command_on_session(device_type: str, host: str, command: str, username: str, password: str, adapter: Optional[Any], timeout: int) -> Dict[str, Any]:
     try:
-        # Run the ping command
-        # capture_output=True: captures stdout and stderr
-        # text=True: decodes stdout/stderr as text
-        # timeout=5: sets a timeout for the command to prevent indefinite hangs
-        result = subprocess.run(command, capture_output=True, text=True, timeout=5)
+        conn = await _ensure_session(host, username, password)
+        entry = SESSION_POOL.get((host, username))
+        if not entry: raise Exception("Session not found after creation")
 
-        # Check the return code: 0 usually means success
-        if result.returncode == 0:
-            return {"ip_address": ip_address, "success": True, "output": result.stdout}
-        else:
-            # If ping failed, return failure status and error/output
-            return {"ip_address": ip_address, "success": False, "output": result.stderr or result.stdout}
+        async with entry["lock"]:
+            final_command = command
+
+            # If an adapter is provided and the device is 'frr', use the adapter's shell
+            if adapter and device_type == 'frr':
+                shell = adapter.get_shell()
+                # Handle multi-line commands for vtysh
+                if "\n" in command:
+                    final_command = f"{shell} << 'EOF'\n{command}\nEOF"
+                else:
+                    final_command = f'{shell} -c "{command}"'
+            # If no adapter is provided, the command is run in the base system shell
+
+            proc = await asyncio.wait_for(conn.run(final_command, check=True), timeout=timeout)
+            return {"success": True, "output": proc.stdout.strip() if proc.stdout else "", "host": host, "command": command}
     except Exception as e:
-        # Catch any exceptions during the process (e.g., command not found, timeout)
-        return {"ip_address": ip_address, "success": False, "output": f"An error occurred: {str(e)}"}
+        return {"success": False, "output": str(e), "host": host, "command": command}
 
-# This function performs a basic network diagnostic (ping) and logs the result.
-# It now takes source_ip and destination_ip as arguments.
-def perform_basic_network_diagnostics(db: Session, source_ip: str, destination_ip: str, trigger: str = "scheduler"):
-    """
-    Performs a ping diagnostic from a source IP to a destination IP
-    and logs the result in the database.
+async def run_device_command_async(device_type: str, host: str, command: str, username: str, password: str, adapter: Optional[Any] = None, timeout: int = DEFAULT_CMD_TIMEOUT) -> Dict[str, Any]:
+    coro = _run_command_on_session(device_type, host, command, username, password, adapter, timeout)
+    fut = _submit_to_ssh_loop(coro)
+    return await asyncio.wrap_future(fut)
 
-    Args:
-        db (Session): The SQLAlchemy database session.
-        source_ip (str): The IP address from which the ping is conceptually initiated.
-        destination_ip (str): The IP address to ping.
-        trigger (str): Describes what triggered this diagnostic (e.g., "scheduler", "manual").
+async def test_command_async(device_type: str, host: str, command: str, username: str, password: str, adapter: Optional[Any] = None, timeout: int = 5) -> bool:
+    result = await run_device_command_async(device_type, host, command, username, password, adapter, timeout)
+    return result.get("success", False)
 
-    Returns:
-        dict: The result of the ping operation.
-    """
-    # Call the ping_host function defined within this same file
-    result = ping_host(destination_ip)
+async def _session_cleanup_task():
+    while True:
+        await asyncio.sleep(SESSION_IDLE_TIMEOUT)
+        now = time.time()
+        to_close = [key for key, entry in SESSION_POOL.items() if now - entry.get("last_used", 0) > SESSION_IDLE_TIMEOUT]
+        for key in to_close:
+            if entry := SESSION_POOL.pop(key, None):
+                if conn := entry.get("conn"):
+                    conn.close()
 
-    # Create a new DiagnosticsLog entry based on the ping result
-    log = DiagnosticsLog(
-        source_ip=source_ip, # Use the provided source_ip
-        destination_ip=result["ip_address"], # Use the IP address from the ping result (which is our destination)
-        status="success" if result["success"] else "failure", # Map success boolean to "success" or "failure" string
-        output=result["output"], # Store the full ping output
-        created_at=datetime.utcnow() # Set the current UTC time for the log entry
-    )
-    db.add(log) # Add the log entry to the database session
-    db.commit() # Commit the transaction to save it to the database
-    db.refresh(log) # Refresh the log object to get its ID
-
-    logging.info(f"[Automation Engine][{trigger}] Logged diagnostic #{log.id} for {destination_ip}")
-    return result # Return the raw ping result
-
-# NEW: Function to connect to a Cisco IOS device and run a command via SSH
-def run_cisco_command(host: str, user: str, password: str, command: str) -> dict:
-    """
-    Connects to a Cisco IOS device via SSH and runs a command.
-
-    Args:
-        host (str): The hostname or IP address of the Cisco device.
-        user (str): The SSH username for the device.
-        password (str): The SSH password for the device.
-        command (str): The command to execute on the device.
-
-    Returns:
-        dict: A dictionary containing the host, command, success status, and output.
-    """
-    print(f"--- Automation Engine: Running '{command}' on {host} ---")
-    
-    # Define device parameters for Netmiko
-    cisco_device = {
-        'device_type': 'cisco_ios', # Specify the device type
-        'host': host,
-        'username': user,
-        'password': password,
-        'global_delay_factor': 2, # Add a delay factor for slower devices/connections
-    }
-    
-    try:
-        # Establish SSH connection and execute command
-        with ConnectHandler(**cisco_device) as net_connect:
-            output = net_connect.send_command(command) # Send the command and capture output
-            return {
-                "host": host,
-                "command": command,
-                "success": True,
-                "output": output
-            }
-    except Exception as e:
-        # Catch any exceptions during connection or command execution
-        return {
-            "host": host,
-            "command": command,
-            "success": False,
-            "output": f"An unexpected error occurred: {str(e)}"
-        }
-
+_ensure_ssh_loop_started()
