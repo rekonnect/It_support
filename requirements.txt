@@ -4,8 +4,11 @@ sqlalchemy
 pydantic[email]
 psycopg2-binary
 APScheduler
+alembic
+netmiko
 
 # The following are helpful package descriptions (commented out):
 # sqlalchemy: The ORM.
 # psycopg2-binary: The driver that lets Python talk to PostgreSQL.
 # alembic: A tool for managing database schema migrations (very useful).
+# netmiko: For connecting to network devices via SSH.
